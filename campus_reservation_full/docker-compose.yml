@@ -1,0 +1,44 @@
+services:
+  web:
+    build: .
+    ports:
+      - "8080:80"
+    volumes:
+      - ./public:/var/www/html
+    environment:
+      DB_HOST: mysql
+      DB_NAME: campus_reservation
+      DB_USER: campus_app
+      DB_PASSWORD: local_app_password
+    depends_on:
+      mysql:
+        condition: service_healthy
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: local_root_password
+      MYSQL_DATABASE: campus_reservation
+      MYSQL_USER: campus_app
+      MYSQL_PASSWORD: local_app_password
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./mysql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 25
+  phpmyadmin:
+    image: phpmyadmin:5
+    ports:
+      - "8081:80"
+    environment:
+      PMA_HOST: mysql
+      PMA_USER: root
+      PMA_PASSWORD: local_root_password
+    depends_on:
+      mysql:
+        condition: service_healthy
+volumes:
+  mysql_data:
