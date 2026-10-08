@@ -1345,3 +1345,165 @@ AuditService::write(
 ## 付記
 
 本書は「初版」であり、TBD-001〜007の確認後に第2版へ更新する。
+
+
+# 詳細設計書
+
+## 1 基本情報
+- システム名：学内施設・備品予約貸出管理システム[cite: 1, 2]
+- チーム名：しゃもじ
+- 参照企画書：docs/01_proposal.md[cite: 1]
+- 開発環境：PHP, MySQL , HTML, CSS, JavaScript, Git, GitHub, VSCode[cite: 1, 3]
+- 配置と標準URL：
+
+## 2 設計上の決定事項
+- 対象範囲と対象外：
+  - 対象範囲（MVP）：ログイン・ログアウト、権限制御、施設・備品一覧、名前・分類検索、詳細表示、予約申請、重複防止、承認・却下、貸出・返却状態管理、自分の予約状況、申請中キャンセル、利用停止（maintenance/inactive設定）、返却期限超過表示、セキュリティ対策（SQLi、XSS、CSRF、Session Fixation、IDOR等）、重要操作の監査ログ[cite: 1, 2, 3]。
+  - 対象外：決済、メール送信、QRコード、外部カレンダー連携、リアルタイム通知、利用回数集計画面、未返却専用一覧、教員専用第三権限、時間単位予約、自動承認、高度なAjax検索、画像アップロード、予約状況カレンダー／タイムライン[cite: 1, 2, 3]。
+- 利用者の準備方法：
+  - 初期の管理担当者アカウントは初期データまたは管理者専用の安全な方法で事前登録する（`role = 'admin'`）[cite: 2, 3]。
+- 日付とキャンセルのルール：
+  - 予約は「利用開始日 (`start_date`)」〜「利用終了/返却予定日 (`end_date`)」の日付範囲（期間）で管理し、時間単位は扱わない[cite: 1, 2, 3]。
+  - キャンセルは一般利用者の本人の予約かつ「申請中（`pending`）」の状態のみ可能[cite: 1, 2, 3]。承認済み以降のキャンセルは不可[cite: 2, 3]。
+- 変更した要件と理由：
+  - `items` 統合テーブル構成：施設と備品を別テーブルにせず `items` テーブルとして一元管理。共通項目・共通画面が多くMVP実装量を抑えられるため[cite: 1, 3]。
+
+## 3 画面と権限
+| 画面ID | 画面名 | 利用者 | 入力 | 操作 | 遷移先 | 関連REQ |
+|---|---|---|---|---|---|---|
+| DES-SCR-001 | ログイン | 全員 | email, password | ログイン | 施設・備品一覧 / 管理トップ | REQ-F-001[cite: 1] |
+| DES-SCR-002 | 施設・備品一覧 | 一般/管理 | 検索キーワード（名称・分類） | 検索, 詳細遷移, 予約状況遷移 | 施設・備品詳細, マイ予約 | REQ-F-003, REQ-F-004[cite: 1] |
+| DES-SCR-003 | 施設・備品詳細 | 一般/管理 | - | 申請画面へ遷移 | 予約申請 | REQ-F-014[cite: 1] |
+| DES-SCR-004 | 予約申請 | 一般/管理 | start_date, end_date, purpose | 予約申請 | マイ予約 | REQ-F-005, REQ-F-009[cite: 1] |
+| DES-SCR-005 | マイ予約 | 一般/管理 | - | 申請中キャンセル | マイ予約 | REQ-F-008, REQ-F-010, REQ-F-011[cite: 1] |
+| DES-SCR-006 | 管理トップ | 管理 | - | 機能選択 | 申請・貸出管理, 施設・備品管理 | REQ-F-002[cite: 1] |
+| DES-SCR-007 | 申請・貸出管理 | 管理 | - | 承認, 却下, 貸出, 返却 | 申請・貸出管理 | REQ-F-006, REQ-F-007, REQ-F-009, REQ-F-011[cite: 1] |
+| DES-SCR-008 | 施設・備品管理 | 管理 | - | 新規登録遷移, 編集遷移, ステータス変更 | 施設・備品登録/編集 | REQ-F-012, REQ-F-013[cite: 1] |
+| DES-SCR-009 | 施設・備品登録/編集 | 管理 | name, category_id, description, status | 保存 | 施設・備品管理 | REQ-F-013[cite: 1] |
+| DES-SCR-010 | 共通エラー | 全員 | - | - | - | REQ-NF-004, REQ-NF-012[cite: 1] |
+
+## 4 予約の状態遷移
+| 現在状態 | 操作 | 次状態 | 操作者 | 許可条件 | 禁止時の動作 |
+|---|---|---|---|---|---|
+| pending (申請中) | 承認 | approved (承認済み) | 管理担当者 | 期間重複がないこと（承認時に再確認）[cite: 1, 2] | トランザクションロールバック・エラー表示[cite: 1, 2] |
+| pending (申請中) | 却下 | rejected (却下) | 管理担当者 | 管理権限があること[cite: 1, 2, 3] | エラー表示[cite: 1, 2] |
+| pending (申請中) | キャンセル | canceled (キャンセル) | 一般利用者（申請者本人） | 本人の予約かつ申請中であること[cite: 1, 2, 3] | キャンセル拒否[cite: 1, 2] |
+| approved (承認済み) | 貸出 | lent (貸出中) | 管理担当者 | 現在状態がapprovedであること[cite: 1, 2, 3] | 状態変更拒否[cite: 1, 2] |
+| lent (貸出中) | 返却 | returned (返却済み) | 管理担当者 | 現在状態がlentであること[cite: 1, 2, 3] | 状態変更拒否[cite: 1, 2] |
+
+※ 返却期限超過は独立した状態ではなく、`status = 'lent' AND end_date < CURRENT_DATE` の場合に表示で判定する[cite: 1, 2, 3]。
+
+## 5 DB設計
+### データベース基本設定
+- **データベース名**: `campus_reservation`[cite: 3]
+- **文字コード**: `utf8mb4` / `utf8mb4_unicode_ci`[cite: 3]
+- **ストレージエンジン**: `InnoDB`[cite: 3]
+
+### テーブル定義
+
+- **users**[cite: 1, 3]
+  - 項目／型／必須／主キー・外部キー／制約／保存する値
+    - `id` / INT UNSIGNED / YES / PK / AUTO_INCREMENT / ユーザーID[cite: 3]
+    - `name` / VARCHAR(100) / YES / - / - / 氏名[cite: 1, 3]
+    - `email` / VARCHAR(255) / YES / - / UNIQUE (uq_users_email) / メールアドレス[cite: 1, 3]
+    - `password` / VARCHAR(255) / YES / - / - / パスワードハッシュ (`password_hash()`)[cite: 1, 3]
+    - `role` / ENUM('user','admin') / YES / - / DEFAULT 'user' / 権限（一般/管理者）[cite: 1, 3]
+
+- **categories**[cite: 1, 3]
+  - 項目／型／必須／主キー・外部キー／制約／保存する値
+    - `id` / INT UNSIGNED / YES / PK / AUTO_INCREMENT / カテゴリID[cite: 3]
+    - `name` / VARCHAR(100) / YES / - / UNIQUE (uq_categories_name) / カテゴリ名[cite: 1, 3]
+
+- **items**[cite: 1, 3]
+  - 項目／型／必須／主キー・外部キー／制約／保存する値
+    - `id` / INT UNSIGNED / YES / PK / AUTO_INCREMENT / アイテムID[cite: 3]
+    - `category_id` / INT UNSIGNED / YES / FK (categories.id) / KEY (idx_items_category) / カテゴリID[cite: 3]
+    - `name` / VARCHAR(100) / YES / - / - / 名称[cite: 1, 3]
+    - `description` / TEXT / NO / - / - / 説明[cite: 1, 3]
+    - `status` / ENUM('available','maintenance','inactive') / YES / - / DEFAULT 'available' / 利用ステータス[cite: 3]
+  - 外部キー制約: `fk_items_category` FOREIGN KEY (`category_id`) REFERENCES `categories`(`id`) ON UPDATE CASCADE ON DELETE RESTRICT[cite: 3]
+
+- **reservations**[cite: 1, 3]
+  - 項目／型／必須／主キー・外部キー／制約／保存する値
+    - `id` / INT UNSIGNED / YES / PK / AUTO_INCREMENT / 予約ID[cite: 3]
+    - `user_id` / INT UNSIGNED / YES / FK (users.id) / KEY (idx_reservations_user) / 申請者ユーザーID[cite: 3]
+    - `item_id` / INT UNSIGNED / YES / FK (items.id) / 複合KEY (idx_reservations_item_dates) / 対象アイテムID[cite: 3]
+    - `start_date` / DATE / YES / - / CHECK (chk_reservations_dates) / 利用開始日[cite: 1, 3]
+    - `end_date` / DATE / YES / - / CHECK (end_date >= start_date) / 利用終了予定日[cite: 1, 3]
+    - `status` / ENUM('pending','approved','lent','returned','rejected','canceled') / YES / - / DEFAULT 'pending' / 予約・貸出ステータス[cite: 3]
+  - 外部キー制約: 
+    - `fk_reservations_user` FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE CASCADE ON DELETE RESTRICT[cite: 3]
+    - `fk_reservations_item` FOREIGN KEY (`item_id`) REFERENCES `items`(`id`) ON UPDATE CASCADE ON DELETE RESTRICT[cite: 3]
+
+### テーブル間の関係と削除時の扱い
+- `users` 1対多 `reservations`[cite: 1, 3]
+- `categories` 1対多 `items`[cite: 1, 3]
+- `items` 1対多 `reservations`[cite: 1, 3]
+- 削除時の扱い: 外部キー制約 `ON DELETE RESTRICT` により、予約が存在するユーザー・アイテム、およびアイテムが存在するカテゴリの物理削除はDBレベルで制限[cite: 3]。不要化する場合は `items.status = 'inactive'` などのフラグ管理（論理的な非活性化）を行う[cite: 1, 2, 3]。
+
+## 6 処理設計
+| 処理名 | URL | HTTPメソッド | 入力 | 権限 | 正常時 | 異常時 |
+|---|---|---|---|---|---|---|
+| DES-PRC-001 ログイン認証 | `/login.php` | POST | email, password, csrf_token | 全員 | セッションID生成、マイ予約等へリダイレクト（PRG） | エラーメッセージ表示 |
+| DES-PRC-002 ログアウト | `/logout.php` | POST | csrf_token | 全員 | セッション破棄・Cookie無効化、ログインへ | エラーメッセージ表示 |
+| DES-PRC-003 一覧・検索 | `/items/index.php` | GET | keyword, category_id | 全員 | 該当施設・備品リスト表示 | 空一覧表示 / エラー画面 |
+| DES-PRC-004 詳細取得 | `/items/detail.php` | GET | id | 全員 | 対象の詳細情報表示 | 404エラー画面 |
+| DES-PRC-005 予約申請 | `/reservations/create.php` | POST | item_id, start_date, end_date, csrf_token | 一般/管理 | status='pending'で登録、マイ予約へPRG | 400エラー/入力画面再表示（修正案内） |
+| DES-PRC-006 承認 | `/admin/reservations/approve.php` | POST | reservation_id, csrf_token | 管理 | status='approved'へ更新、一覧へPRG | 重複・状態不整合時はロールバックしエラー表示 |
+| DES-PRC-006 却下 | `/admin/reservations/reject.php` | POST | reservation_id, csrf_token | 管理 | status='rejected'へ更新、一覧へPRG | 状態不整合時はエラー表示 |
+| DES-PRC-007 貸出 | `/admin/reservations/lend.php` | POST | reservation_id, csrf_token | 管理 | status='lent'へ更新、一覧へPRG | 400/403エラー |
+| DES-PRC-007 返却 | `/admin/reservations/return.php` | POST | reservation_id, csrf_token | 管理 | status='returned'へ更新、一覧へPRG | 400/403エラー |
+| DES-PRC-008 予約キャンセル | `/reservations/cancel.php` | POST | reservation_id, csrf_token | 本人/管理 | status='canceled'へ更新、マイ予約へPRG | 他人・非pending予約の場合は拒否（403等） |
+| DES-PRC-009 施設・備品管理 | `/admin/items/create.php` 等 | POST | name, category_id, description, status, csrf_token | 管理 | 対象情報の作成・更新・ステータス変更、管理一覧へPRG | 入力エラー/変更不可時エラー |
+
+## 7 入力検証と安全性
+- 入力検証：必須チェック、型判定（正の整数ID等）、日付フォーマット（`Y-m-d`）および前後関係（`start_date <= end_date`）、文字数制限、ホワイトリスト検証（role, status等）を全てPHPサーバ側で厳密に実施[cite: 1, 2, 3]。
+- DB操作：PDO＋プリペアドステートメント（`PDO::ATTR_EMULATE_PREPARES = false`）を使用し、SQLインジェクションを完全防止[cite: 1, 2]。重複予約の判定・承認時にはトランザクション＋`FOR UPDATE`による行ロックを利用し、二重予約を遮断[cite: 1, 2]。
+- 出力：HTML出力時に共通関数 `e()` （`htmlspecialchars(..., ENT_QUOTES, 'UTF-8')`）を適用してXSSを防止[cite: 1, 2]。
+- 認証：パスワードは `password_hash()` / `password_verify()` を使用[cite: 1, 2]。ログイン成功時に `session_regenerate_id(true)` を実行[cite: 1, 2]。
+- 認可：セッションから `user_id` と `role` を取得してサーバ側で認可チェック。クライアントからの成りすまし（IDOR）を防止[cite: 1, 2]。
+- CSRF：状態変更処理はPOSTメソッドのみとし、セッション内の `csrf_token` （`random_bytes(32)`生成）とフォーム送信値を `hash_equals()` で検証[cite: 1, 2]。
+- エラー表示：画面には修正方法がわかる一般化されたエラーメッセージを表示し、内部情報は隠蔽[cite: 1, 2]。
+
+## 8 テスト観点
+| テストID | 関連REQ | 事前条件 | 操作 | 期待結果 |
+|---|---|---|---|---|
+| DES-TST-001 | REQ-NF-003 | 検索・入力画面表示 | `' OR 1=1 --` 等の文字列を入力して送信 | SQLエラーが発生せず、通常通り安全に検索・処理される[cite: 1, 2] |
+| DES-TST-002 | REQ-NF-009 | 入力フォーム表示 | `<script>alert(1)</script>` を入力して送信 | スクリプトが実行されず、文字列として表示される[cite: 1, 2] |
+| DES-TST-003 | REQ-NF-011 | POST送信準備 | CSRFトークンを削除または改ざんしてPOST送信 | 403エラーとなり更新が拒否される[cite: 1, 2] |
+| DES-TST-004 | REQ-NF-010 | ログイン前 | ログイン実行後、一定時間（30分）放置 | ログイン前後でセッションIDが変わり、30分後に自動失効し再ログインが必要になる[cite: 1, 2] |
+| DES-TST-005 | REQ-NF-005 | ブラウザ準備 | Chrome / Edge から主要機能にアクセス | 主要機能が正常に動作する[cite: 1, 2] |
+| DES-TST-006 | REQ-NF-002, REQ-F-008, 010 | 一般ユーザーでログイン | 他人の予約IDを指定して閲覧・キャンセルリクエストを送信 | 閲覧・キャンセルが拒否される[cite: 1, 2] |
+| DES-TST-007 | REQ-F-002 | 一般ユーザーでログイン | 管理者専用URLへ直接アクセス | 403等で拒否され画面を表示しない[cite: 1, 2] |
+| DES-TST-008 | REQ-F-009 | 同一対象・同一期間に複数承認リクエスト | 管理者2名で同時に承認処理を実行 | トランザクション処理により二重承認されず、1件のみ成立する[cite: 1, 2] |
+
+## 9 要件と設計の対応
+| REQ ID | 画面 | 処理 | テーブル | 関連Issue |
+|---|---|---|---|---|
+| REQ-F-001 | DES-SCR-001[cite: 1] | DES-PRC-001, DES-PRC-002[cite: 1] | users[cite: 1, 3] | |
+| REQ-F-002 | DES-SCR-006〜009[cite: 1] | DES-PRC-009[cite: 1] | users[cite: 1, 3] | |
+| REQ-F-003 | DES-SCR-002[cite: 1] | DES-PRC-003[cite: 1] | categories, items[cite: 1, 3] | |
+| REQ-F-004 | DES-SCR-002[cite: 1] | DES-PRC-003[cite: 1] | categories, items[cite: 1, 3] | |
+| REQ-F-005 | DES-SCR-004[cite: 1] | DES-PRC-005[cite: 1] | items, reservations[cite: 1, 3] | |
+| REQ-F-006 | DES-SCR-007[cite: 1] | DES-PRC-006[cite: 1] | reservations[cite: 1, 3] | |
+| REQ-F-007 | DES-SCR-007[cite: 1] | DES-PRC-007[cite: 1] | reservations[cite: 1, 3] | |
+| REQ-F-008 | DES-SCR-005[cite: 1] | DES-PRC-008[cite: 1] | reservations[cite: 1, 3] | |
+| REQ-F-009 | - | DES-PRC-005, DES-PRC-006[cite: 1] | reservations[cite: 1, 3] | |
+| REQ-F-010 | DES-SCR-005[cite: 1] | DES-PRC-008[cite: 1] | reservations[cite: 1, 3] | |
+| REQ-F-011 | DES-SCR-005, DES-SCR-007[cite: 1] | DES-PRC-006, DES-PRC-007, DES-PRC-008[cite: 1] | reservations[cite: 1, 3] | |
+| REQ-F-012 | DES-SCR-008[cite: 1] | DES-PRC-009[cite: 1] | items[cite: 1, 3] | |
+| REQ-F-013 | DES-SCR-008, DES-SCR-009[cite: 1] | DES-PRC-009[cite: 1] | items[cite: 1, 3] | |
+| REQ-F-014 | DES-SCR-003[cite: 1] | DES-PRC-004[cite: 1] | categories, items[cite: 1, 3] | |
+
+## 10 未解決事項
+| 内容 | 確認担当 | 期限 | 第3回の確認事項 | 第4回開発への影響 |
+|---|---|---|---|---|
+| TBD-001: アカウント作成・登録運用 | | | 初期シーダー・管理者の登録手順の確定 | 開発初期のデータ準備 |
+| TBD-002: 却下理由の保持方法 | | | `reservations` テーブルへ `note` カラム追加の要否 | 画面・DB変更 |
+| TBD-003: ログイン失敗制限のパラメタ | | | ロックアウト回数および解除時間の決定 | ログイン処理の実装 |
+| TBD-004: セキュリティヘッダーの付与方式 | | | `.htaccess` か PHP側Header出力かの決定 | 共通インクルード設計 |
+
+## 11 レビュー記録
+| 指摘 | 対応 | 確認者 |
+|---|---|---|
+| SQLのテーブル名・カラム名を `items` / `end_date` / `canceled` に同期 | 詳細設計書全体（DB定義、画面、処理、対応表）の記述を提示されたDDLに合わせて更新完了 | |
