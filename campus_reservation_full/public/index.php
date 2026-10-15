@@ -26,6 +26,8 @@ function current_user(): ?array {
 }
 function require_auth(?array $u): void { if (!$u) { http_response_code(403); throw new RuntimeException('ログインしてください。'); } }
 function require_admin(?array $u): void { require_auth($u); if ($u['role'] !== 'admin') {http_response_code(403); throw new RuntimeException('管理者専用の操作です。');} }
+function protected_page(string $page): bool { return in_array($page,['account','reserve','mine','manage_reservations','manage_items'],true); }
+function admin_page(string $page): bool { return in_array($page,['manage_reservations','manage_items'],true); }
 function valid_date(string $v): bool { $d=DateTimeImmutable::createFromFormat('!Y-m-d',$v); return $d!==false && $d->format('Y-m-d')===$v; }
 function valid_interval(string $a,string $b): bool { return valid_date($a)&&valid_date($b)&&$b>=$a; }
 function stmt_is_busy(int $item, string $start, string $end, int $except=0): bool {
@@ -89,10 +91,15 @@ function action(string $name, array $u): void {
     throw new RuntimeException('不明な操作です。');
 }
 $page=(string)($_GET['page']??'items');
-if (in_array($page,['account','reserve','mine','manage_reservations','manage_items'],true) && empty($_SESSION['uid'])) { header('Location: /?page=login'); exit; }
-if (in_array($page,['manage_reservations','manage_items'],true) && !empty($_SESSION['uid'])) { $role=q('SELECT role FROM users WHERE id=?',[(int)$_SESSION['uid']])->fetchColumn(); if ($role!=='admin') { http_response_code(403); echo '管理者専用のページです。'; exit; } }
 $u=null; $error=null;
 try {
+    $u=current_user();
+    if (protected_page($page) && !$u) redirect('login');
+    if (admin_page($page) && $u['role']!=='admin') {
+        http_response_code(403);
+        $error='管理者専用のページです。';
+        $page='forbidden';
+    }
     if ($_SERVER['REQUEST_METHOD']==='POST') {
         if (!hash_equals(csrf(),(string)($_POST['csrf']??''))) throw new RuntimeException('セッションの有効期限が切れました。ページを更新してください。');
         $a=(string)($_POST['action']??'');
@@ -119,6 +126,8 @@ function f(string $act,string $back, string $button, string $inner='', string $c
 <?php if($notice): ?><div class="alert<?=!empty($notice['error'])?' error':''?>"><?=esc($notice['message'])?></div><?php endif; ?><?php if($error): ?><div class="alert error"><?=esc($error)?></div><?php endif; ?>
 <?php if($page==='login'): ?>
 <section class="card"><h2>ログイン</h2><?php if($u): ?><p>すでにログインしています。</p><?php else: ?><form method="post" style="max-width:440px"><?=csrf_field()?><input type="hidden" name="action" value="login"><label>メールアドレス<input type="email" name="email" required autocomplete="username"></label><label>パスワード<input type="password" name="password" required autocomplete="current-password"></label><button>ログイン</button></form><p class="muted">デモ用アカウントは README.md を参照してください。</p><?php endif; ?></section>
+<?php elseif($page==='forbidden'): ?>
+<section class="card"><h2>アクセスできません</h2><p>このページを利用する権限がありません。</p><a href="/?page=items">施設・備品一覧へ戻る</a></section>
 <?php elseif($page==='account'): require_auth($u); ?>
 <section class="card"><h2>アカウント</h2><p>氏名：<?=esc($u['name'])?></p><p>メール：<?=esc($u['email'])?></p><p>権限：<?=esc($u['role']==='admin'?'管理者':'一般利用者')?></p><?php f('logout','account','ログアウト'); ?></section>
 <?php elseif($page==='items'): ?>
