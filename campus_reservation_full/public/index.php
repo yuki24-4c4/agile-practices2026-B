@@ -52,7 +52,7 @@ function action(string $name, array $u): void {
     if ($name==='cancel') {
         $id=(int)($_POST['id']??0);
         $s=q("UPDATE reservations SET status='canceled' WHERE id=? AND user_id=? AND status='pending'",[$id,$u['id']]);
-        if (!$s->rowCount()) throw new RuntimeException('この予約はキャンセルできません。');
+        if (!$s->rowCount()) { http_response_code(403); throw new RuntimeException('この予約はキャンセルできません。'); }
         flash('予約をキャンセルしました。');
     }
     if ($name==='change_reservation') {
@@ -101,7 +101,7 @@ try {
         $page='forbidden';
     }
     if ($_SERVER['REQUEST_METHOD']==='POST') {
-        if (!hash_equals(csrf(),(string)($_POST['csrf']??''))) throw new RuntimeException('セッションの有効期限が切れました。ページを更新してください。');
+        if (!hash_equals(csrf(),(string)($_POST['csrf']??''))) { http_response_code(403); throw new RuntimeException('セッションの有効期限が切れました。ページを更新してください。'); }
         $a=(string)($_POST['action']??'');
         if ($a==='login') {
             $row=q('SELECT * FROM users WHERE email=?',[trim((string)($_POST['email']??''))])->fetch();
