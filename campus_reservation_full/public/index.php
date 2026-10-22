@@ -1,10 +1,16 @@
 <?php
 declare(strict_types=1);
+
 header('Content-Type: text/html; charset=UTF-8');
 header('X-Frame-Options: DENY');
 header('Cache-Control: no-store');
 ini_set('display_errors', '0');
-session_set_cookie_params(['httponly'=>true,'samesite'=>'Lax','secure'=>!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off']);
+
+session_set_cookie_params([
+    'httponly' => true,
+    'samesite' => 'Lax',
+    'secure' => !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off'
+]);
 session_start();
 if (!empty($_SESSION['uid']) && isset($_SESSION['last_activity']) && time() - (int)$_SESSION['last_activity'] > 1800) {
     $_SESSION = [];
@@ -19,16 +25,151 @@ if (!empty($_SESSION['uid']) && isset($_SESSION['last_activity'])) { $_SESSION['
 function esc(mixed $s): string { return htmlspecialchars((string)($s??''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); }
 function db(): PDO {
     static $pdo = null;
+
     if ($pdo === null) {
-        $pdo = new PDO('mysql:host='.getenv('DB_HOST').';dbname='.getenv('DB_NAME').';charset=utf8mb4', (string)getenv('DB_USER'), (string)getenv('DB_PASSWORD'), [PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION,PDO::ATTR_DEFAULT_FETCH_MODE=>PDO::FETCH_ASSOC,PDO::ATTR_EMULATE_PREPARES=>false]);
+        $pdo = new PDO(
+            'mysql:host=' . getenv('DB_HOST') .
+            ';dbname=' . getenv('DB_NAME') .
+            ';charset=utf8mb4',
+            (string)getenv('DB_USER'),
+            (string)getenv('DB_PASSWORD'),
+            [
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                PDO::ATTR_EMULATE_PREPARES => false
+            ]
+        );
     }
+
     return $pdo;
 }
-function q(string $sql, array $args=[]): PDOStatement { $s=db()->prepare($sql); $s->execute($args); return $s; }
-function csrf(): string { return $_SESSION['csrf'] ??= bin2hex(random_bytes(24)); }
-function csrf_field(): string { return '<input type="hidden" name="csrf" value="'.esc(csrf()).'">'; }
-function redirect(string $page='items'): never { header('Location: /?page='.rawurlencode($page)); exit; }
-function flash(string $msg, bool $error=false): never { $_SESSION['flash']=['message'=>$msg,'error'=>$error]; redirect($_POST['back']??'items'); }
+
+function q(string $sql, array $args = []): PDOStatement {
+    $s = db()->prepare($sql);
+    $s->execute($args);
+    return $s;
+}
+
+// ========================================
+// 日本語テストデータの自動修正
+// ========================================
+// 初回アクセス時に一度だけ実行する。
+// 既存のサンプルIDだけを対象にする。
+// 予約データ・パスワードは変更しない。
+
+function fix_demo_seed_japanese_once(): void {
+    $pdo = db();
+
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS app_migrations (
+            version VARCHAR(100) NOT NULL PRIMARY KEY,
+            applied_at TIMESTAMP NOT NULL
+                DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB
+        DEFAULT CHARSET=utf8mb4
+        COLLATE=utf8mb4_unicode_ci
+    ");
+
+    $pdo->beginTransaction();
+
+    try {
+        $stmt = $pdo->prepare(
+            'INSERT IGNORE INTO app_migrations (version) VALUES (?)'
+        );
+
+        $stmt->execute([
+            '20261015_fix_demo_seed_japanese_v1'
+        ]);
+
+        if ($stmt->rowCount() === 1) {
+
+            // 利用者名
+            $users = [
+                [1, 'yamada@example.com', '山田太郎'],
+                [2, 'sato@example.com', '佐藤花子'],
+                [3, 'admin@example.com', '管理者A']
+            ];
+
+            $stmt = $pdo->prepare(
+                'UPDATE users SET name=? WHERE id=? AND email=?'
+            );
+
+            foreach ($users as [$id, $email, $name]) {
+                $stmt->execute([$name, $id, $email]);
+            }
+
+            // カテゴリー名
+            $categories = [
+                1 => '普通教室',
+                2 => 'PC関連',
+                3 => '音響機器'
+            ];
+
+            $stmt = $pdo->prepare(
+                'UPDATE categories SET name=? WHERE id=?'
+            );
+
+            foreach ($categories as $id => $name) {
+                $stmt->execute([$name, $id]);
+            }
+
+            // 施設・備品名と説明
+            $items = [
+                1 => ['101教室', '定員30名'],
+                2 => ['102教室', '定員40名'],
+                3 => ['ノートPC A', 'Windows11搭載'],
+                4 => ['ワイヤレスマイクA', '無線接続対応']
+            ];
+
+            $stmt = $pdo->prepare(
+                'UPDATE items SET name=?, description=? WHERE id=?'
+            );
+
+            foreach ($items as $id => [$name, $description]) {
+                $stmt->execute([
+                    $name,
+                    $description,
+                    $id
+                ]);
+            }
+        }
+
+        $pdo->commit();
+
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
+    }
+}
+
+// ========================================
+// セッション・認証
+// ========================================
+
+function csrf(): string {
+    return $_SESSION['csrf'] ??= bin2hex(random_bytes(24));
+}
+
+function csrf_field(): string {
+    return '<input type="hidden" name="csrf" value="' .
+        esc(csrf()) . '">';
+}
+
+function redirect(string $page = 'items'): never {
+    header('Location: /?page=' . rawurlencode($page));
+    exit;
+}
+
+function flash(string $msg, bool $error = false): never {
+    $_SESSION['flash'] = [
+        'message' => $msg,
+        'error' => $error
+    ];
+    redirect($_POST['back'] ?? 'items');
+}
+
 function current_user(): ?array {
     if (empty($_SESSION['uid'])) return null;
     $u=q('SELECT id,name,email,role FROM users WHERE id=?',[(int)$_SESSION['uid']])->fetch();
@@ -36,6 +177,8 @@ function current_user(): ?array {
 }
 function require_auth(?array $u): void { if (!$u) { http_response_code(403); throw new RuntimeException('ログインしてください。'); } }
 function require_admin(?array $u): void { require_auth($u); if ($u['role'] !== 'admin') {http_response_code(403); throw new RuntimeException('管理者専用の操作です。');} }
+function protected_page(string $page): bool { return in_array($page,['account','reserve','mine','manage_reservations','manage_items'],true); }
+function admin_page(string $page): bool { return in_array($page,['manage_reservations','manage_items'],true); }
 function valid_date(string $v): bool { $d=DateTimeImmutable::createFromFormat('!Y-m-d',$v); return $d!==false && $d->format('Y-m-d')===$v; }
 function valid_interval(string $a,string $b): bool { return valid_date($a)&&valid_date($b)&&$b>=$a; }
 function stmt_is_busy(int $item, string $start, string $end, int $except=0): bool {
@@ -43,81 +186,297 @@ function stmt_is_busy(int $item, string $start, string $end, int $except=0): boo
 }
 function status_name(string $s): string { return ['available'=>'利用可能','maintenance'=>'メンテナンス','inactive'=>'利用停止','pending'=>'申請中','approved'=>'承認済み','lent'=>'貸出中','returned'=>'返却済み','rejected'=>'却下','canceled'=>'キャンセル'][$s]??$s; }
 function action(string $name, array $u): void {
-    if ($name==='logout') { $_SESSION=[]; session_regenerate_id(true); flash('ログアウトしました。'); }
-    if ($name==='reserve') {
-        $id=(int)($_POST['item_id']??0); $a=trim((string)($_POST['start_date']??'')); $b=trim((string)($_POST['end_date']??''));
-        if (!valid_interval($a,$b) || $a < date('Y-m-d')) throw new RuntimeException('今日以降の正しい予約期間を入力してください。');
-        $pdo=db(); $pdo->beginTransaction();
+
+    if ($name === 'logout') {
+        $_SESSION = [];
+        session_regenerate_id(true);
+        flash('ログアウトしました。');
+    }
+
+    if ($name === 'reserve') {
+        $id = (int)($_POST['item_id'] ?? 0);
+        $a = trim((string)($_POST['start_date'] ?? ''));
+        $b = trim((string)($_POST['end_date'] ?? ''));
+
+        if (!valid_interval($a, $b) || $a < date('Y-m-d')) {
+            throw new RuntimeException(
+                '今日以降の正しい予約期間を入力してください。'
+            );
+        }
+
+        $pdo = db();
+        $pdo->beginTransaction();
+
         try {
-            $item=q('SELECT id,status FROM items WHERE id=? FOR UPDATE',[$id])->fetch();
-            if (!$item || $item['status']!=='available') throw new RuntimeException('この施設・備品は予約できません。');
-            if (stmt_is_busy($id,$a,$b)) throw new RuntimeException('その期間はすでに予約されています。');
-            q("INSERT INTO reservations (user_id,item_id,start_date,end_date,status) VALUES (?,?,?,?,'pending')",[$u['id'],$id,$a,$b]);
+            $item = q(
+                'SELECT id,status FROM items WHERE id=? FOR UPDATE',
+                [$id]
+            )->fetch();
+
+            if (!$item || $item['status'] !== 'available') {
+                throw new RuntimeException(
+                    'この施設・備品は予約できません。'
+                );
+            }
+
+            if (stmt_is_busy($id, $a, $b)) {
+                throw new RuntimeException(
+                    'その期間はすでに予約されています。'
+                );
+            }
+
+            q(
+                "INSERT INTO reservations
+                 (user_id,item_id,start_date,end_date,status)
+                 VALUES (?,?,?,?,'pending')",
+                [$u['id'], $id, $a, $b]
+            );
+
             $pdo->commit();
-        } catch (Throwable $e) { $pdo->rollBack(); throw $e; }
+
+        } catch (Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
+
         flash('予約申請を受け付けました。');
     }
     if ($name==='cancel') {
         $id=(int)($_POST['id']??0);
-        $s=q("UPDATE reservations SET status='canceled' WHERE id=? AND user_id=? AND status IN ('pending','approved')",[$id,$u['id']]);
-        if (!$s->rowCount()) throw new RuntimeException('この予約はキャンセルできません。');
+        $s=q("UPDATE reservations SET status='canceled' WHERE id=? AND user_id=? AND status='pending'",[$id,$u['id']]);
+        if (!$s->rowCount()) { http_response_code(403); throw new RuntimeException('この予約はキャンセルできません。'); }
         flash('予約をキャンセルしました。');
     }
-    if ($name==='change_reservation') {
-        require_admin($u); $id=(int)($_POST['id']??0); $next=(string)($_POST['status']??'');
-        $transitions=['pending'=>['approved','rejected'],'approved'=>['lent','canceled'],'lent'=>['returned']];
-        $pdo=db(); $pdo->beginTransaction();
+
+    if ($name === 'change_reservation') {
+        require_admin($u);
+
+        $id = (int)($_POST['id'] ?? 0);
+        $next = (string)($_POST['status'] ?? '');
+
+        $transitions = [
+            'pending' => ['approved', 'rejected'],
+            'approved' => ['lent', 'canceled'],
+            'lent' => ['returned']
+        ];
+
+        $pdo = db();
+        $pdo->beginTransaction();
+
         try {
-            $r=q('SELECT * FROM reservations WHERE id=? FOR UPDATE',[$id])->fetch();
-            if (!$r || !in_array($next,$transitions[$r['status']]??[],true)) throw new RuntimeException('許可されていない状態変更です。');
-            q('SELECT id FROM items WHERE id=? FOR UPDATE',[$r['item_id']]);
-            if (in_array($next,['approved','lent'],true)) {
-                $it=q('SELECT status FROM items WHERE id=?',[$r['item_id']])->fetch();
-                if ($it['status']!=='available') throw new RuntimeException('使用できない備品です。');
-                if (stmt_is_busy((int)$r['item_id'],$r['start_date'],$r['end_date'],$id)) throw new RuntimeException('予約期間が重複しています。');
+            $r = q(
+                'SELECT * FROM reservations WHERE id=? FOR UPDATE',
+                [$id]
+            )->fetch();
+
+            if (
+                !$r ||
+                !in_array(
+                    $next,
+                    $transitions[$r['status']] ?? [],
+                    true
+                )
+            ) {
+                throw new RuntimeException(
+                    '許可されていない状態変更です。'
+                );
             }
-            q('UPDATE reservations SET status=? WHERE id=?',[$next,$id]);
+
+            q(
+                'SELECT id FROM items WHERE id=? FOR UPDATE',
+                [$r['item_id']]
+            );
+
+            if (in_array($next, ['approved', 'lent'], true)) {
+                $it = q(
+                    'SELECT status FROM items WHERE id=?',
+                    [$r['item_id']]
+                )->fetch();
+
+                if ($it['status'] !== 'available') {
+                    throw new RuntimeException(
+                        '使用できない備品です。'
+                    );
+                }
+
+                if (stmt_is_busy(
+                    (int)$r['item_id'],
+                    $r['start_date'],
+                    $r['end_date'],
+                    $id
+                )) {
+                    throw new RuntimeException(
+                        '予約期間が重複しています。'
+                    );
+                }
+            }
+
+            q(
+                'UPDATE reservations SET status=? WHERE id=?',
+                [$next, $id]
+            );
+
             $pdo->commit();
-        } catch (Throwable $e) { $pdo->rollBack(); throw $e; }
+
+        } catch (Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
+
         flash('予約状態を変更しました。');
     }
-    if ($name==='save_category') {
-        require_admin($u); $v=trim((string)($_POST['name']??''));
-        if ($v==='' || strlen($v)>300) throw new RuntimeException('カテゴリー名は1〜100文字で入力してください。');
-        q('INSERT INTO categories (name) VALUES (?)',[$v]); flash('カテゴリーを登録しました。');
+
+    if ($name === 'save_category') {
+        require_admin($u);
+
+        $v = trim((string)($_POST['name'] ?? ''));
+
+        if ($v === '' || strlen($v) > 300) {
+            throw new RuntimeException(
+                'カテゴリー名は1〜100文字で入力してください。'
+            );
+        }
+
+        q(
+            'INSERT INTO categories (name) VALUES (?)',
+            [$v]
+        );
+
+        flash('カテゴリーを登録しました。');
     }
-    if ($name==='save_item') {
-        require_admin($u); $id=(int)($_POST['id']??0); $cat=(int)($_POST['category_id']??0); $name=trim((string)($_POST['name']??'')); $desc=trim((string)($_POST['description']??'')); $status=(string)($_POST['status']??'available');
-        if ($name==='' || strlen($name)>300 || !in_array($status,['available','maintenance','inactive'],true)) throw new RuntimeException('入力内容を確認してください。');
-        if (!q('SELECT id FROM categories WHERE id=?',[$cat])->fetch()) throw new RuntimeException('カテゴリーが存在しません。');
+
+    if ($name === 'save_item') {
+        require_admin($u);
+
+        $id = (int)($_POST['id'] ?? 0);
+        $cat = (int)($_POST['category_id'] ?? 0);
+        $name = trim((string)($_POST['name'] ?? ''));
+        $desc = trim((string)($_POST['description'] ?? ''));
+        $status = (string)($_POST['status'] ?? 'available');
+
+        if (
+            $name === '' ||
+            strlen($name) > 300 ||
+            !in_array(
+                $status,
+                ['available', 'maintenance', 'inactive'],
+                true
+            )
+        ) {
+            throw new RuntimeException('入力内容を確認してください。');
+        }
+
+        if (!q(
+            'SELECT id FROM categories WHERE id=?',
+            [$cat]
+        )->fetch()) {
+            throw new RuntimeException(
+                'カテゴリーが存在しません。'
+            );
+        }
+
         if ($id) {
-            if ($status!=='available' && q("SELECT id FROM reservations WHERE item_id=? AND status IN ('pending','approved','lent') LIMIT 1",[$id])->fetch()) throw new RuntimeException('進行中の予約があるため停止できません。');
-            q('UPDATE items SET category_id=?, name=?, description=?, status=? WHERE id=?',[$cat,$name,$desc,$status,$id]);
-        } else q('INSERT INTO items (category_id,name,description,status) VALUES (?,?,?,?)',[$cat,$name,$desc,$status]);
+            if (
+                $status !== 'available' &&
+                q(
+                    "SELECT id FROM reservations
+                     WHERE item_id=?
+                     AND status IN ('pending','approved','lent')
+                     LIMIT 1",
+                    [$id]
+                )->fetch()
+            ) {
+                throw new RuntimeException(
+                    '進行中の予約があるため停止できません。'
+                );
+            }
+
+            q(
+                'UPDATE items
+                 SET category_id=?, name=?, description=?, status=?
+                 WHERE id=?',
+                [$cat, $name, $desc, $status, $id]
+            );
+
+        } else {
+            q(
+                'INSERT INTO items
+                 (category_id,name,description,status)
+                 VALUES (?,?,?,?)',
+                [$cat, $name, $desc, $status]
+            );
+        }
+
         flash('施設・備品を保存しました。');
     }
+
     throw new RuntimeException('不明な操作です。');
 }
 $page=(string)($_GET['page']??'items');
-if (in_array($page,['account','reserve','mine','manage_reservations','manage_items'],true) && empty($_SESSION['uid'])) { header('Location: /?page=login'); exit; }
-if (in_array($page,['manage_reservations','manage_items'],true) && !empty($_SESSION['uid'])) { $role=q('SELECT role FROM users WHERE id=?',[(int)$_SESSION['uid']])->fetchColumn(); if ($role!=='admin') { http_response_code(403); echo '管理者専用のページです。'; exit; } }
 $u=null; $error=null;
 try {
+    $u=current_user();
+    if (protected_page($page) && !$u) redirect('login');
+    if (admin_page($page) && $u['role']!=='admin') {
+        http_response_code(403);
+        $error='管理者専用のページです。';
+        $page='forbidden';
+    }
     if ($_SERVER['REQUEST_METHOD']==='POST') {
-        if (!hash_equals(csrf(),(string)($_POST['csrf']??''))) throw new RuntimeException('セッションの有効期限が切れました。ページを更新してください。');
+        if (!hash_equals(csrf(),(string)($_POST['csrf']??''))) { http_response_code(403); throw new RuntimeException('セッションの有効期限が切れました。ページを更新してください。'); }
         $a=(string)($_POST['action']??'');
         if ($a==='login') {
             $row=q('SELECT * FROM users WHERE email=?',[trim((string)($_POST['email']??''))])->fetch();
             if (!$row || !password_verify((string)($_POST['password']??''),$row['password'])) throw new RuntimeException('メールアドレスまたはパスワードが違います。');
             session_regenerate_id(true); $_SESSION['uid']=$row['id']; flash('ログインしました。');
         }
-        $u=current_user();
-        if ($a==='logout') { action($a,[]); }
-        require_auth($u); action($a,$u);
+
+        $a = (string)($_POST['action'] ?? '');
+
+        if ($a === 'login') {
+            $row = q(
+                'SELECT * FROM users WHERE email=?',
+                [trim((string)($_POST['email'] ?? ''))]
+            )->fetch();
+
+            if (
+                !$row ||
+                !password_verify(
+                    (string)($_POST['password'] ?? ''),
+                    $row['password']
+                )
+            ) {
+                throw new RuntimeException(
+                    'メールアドレスまたはパスワードが違います。'
+                );
+            }
+
+            session_regenerate_id(true);
+            $_SESSION['uid'] = $row['id'];
+            flash('ログインしました。');
+        }
+
+        $u = current_user();
+
+        if ($a === 'logout') {
+            action($a, []);
+        }
+
+        require_auth($u);
+        action($a, $u);
     }
-    $u=current_user();
-} catch (Throwable $e) { $error=$e instanceof PDOException?'データベースエラーが発生しました。起動状態を確認してください。':$e->getMessage(); }
-$notice=$_SESSION['flash']??null; unset($_SESSION['flash']);
+
+    $u = current_user();
+
+} catch (Throwable $e) {
+    $error = $e instanceof PDOException
+        ? 'データベースエラーが発生しました。起動状態を確認してください。'
+        : $e->getMessage();
+}
+
+$notice = $_SESSION['flash'] ?? null;
+unset($_SESSION['flash']);
+
 try {
     $cats=q('SELECT * FROM categories ORDER BY id')->fetchAll();
     $items=q('SELECT i.*,c.name AS category_name FROM items i JOIN categories c ON c.id=i.category_id ORDER BY i.id')->fetchAll();
@@ -129,6 +488,8 @@ function f(string $act,string $back, string $button, string $inner='', string $c
 <?php if($notice): ?><div class="alert<?=!empty($notice['error'])?' error':''?>"><?=esc($notice['message'])?></div><?php endif; ?><?php if($error): ?><div class="alert error"><?=esc($error)?></div><?php endif; ?>
 <?php if($page==='login'): ?>
 <section class="card"><h2>ログイン</h2><?php if($u): ?><p>すでにログインしています。</p><?php else: ?><form method="post" style="max-width:440px"><?=csrf_field()?><input type="hidden" name="action" value="login"><label>メールアドレス<input type="email" name="email" required autocomplete="username"></label><label>パスワード<input type="password" name="password" required autocomplete="current-password"></label><button>ログイン</button></form><p class="muted">デモ用アカウントは README.md を参照してください。</p><?php endif; ?></section>
+<?php elseif($page==='forbidden'): ?>
+<section class="card"><h2>アクセスできません</h2><p>このページを利用する権限がありません。</p><a href="/?page=items">施設・備品一覧へ戻る</a></section>
 <?php elseif($page==='account'): require_auth($u); ?>
 <section class="card"><h2>アカウント</h2><p>氏名：<?=esc($u['name'])?></p><p>メール：<?=esc($u['email'])?></p><p>権限：<?=esc($u['role']==='admin'?'管理者':'一般利用者')?></p><?php f('logout','account','ログアウト'); ?></section>
 <?php elseif($page==='items'): ?>
@@ -136,7 +497,7 @@ function f(string $act,string $back, string $button, string $inner='', string $c
 <?php elseif($page==='reserve'): require_auth($u); $item=null; foreach($items as $i){if((int)$i['id']===(int)($_GET['id']??0)) $item=$i;} if(!$item||$item['status']!=='available') throw new RuntimeException('予約できる備品が見つかりません。'); ?>
 <section class="card"><h2>予約申請：<?=esc($item['name'])?></h2><p>日付は開始日・終了日ともに含まれます。重複する申請がある期間は予約できません。</p><form method="post"><?=csrf_field()?><input type="hidden" name="action" value="reserve"><input type="hidden" name="back" value="items"><input type="hidden" name="item_id" value="<?=esc($item['id'])?>"><div class="grid"><label>利用開始日<input type="date" name="start_date" min="<?=date('Y-m-d')?>" required></label><label>利用終了日<input type="date" name="end_date" min="<?=date('Y-m-d')?>" required></label></div><button>予約を申請</button></form></section>
 <?php elseif($page==='mine'): require_auth($u); $rows=q('SELECT r.*,i.name AS item_name FROM reservations r JOIN items i ON i.id=r.item_id WHERE r.user_id=? ORDER BY r.id DESC',[$u['id']])->fetchAll(); ?>
-<section class="card"><h2>自分の予約履歴</h2><div class="scroll"><table><tr><th>予約ID</th><th>施設・備品</th><th>期間</th><th>状況</th><th>操作</th></tr><?php foreach($rows as $r): ?><tr><td><?=esc($r['id'])?></td><td><?=esc($r['item_name'])?></td><td><?=esc($r['start_date'])?> ～ <?=esc($r['end_date'])?></td><td><?=esc(status_name($r['status']))?></td><td><?php if(in_array($r['status'],['pending','approved'],true)): ?><?php f('cancel','mine','キャンセル','<input type="hidden" name="id" value="'.esc($r['id']).'">','inline'); ?><?php endif; ?></td></tr><?php endforeach; ?></table></div></section>
+<section class="card"><h2>自分の予約履歴</h2><div class="scroll"><table><tr><th>予約ID</th><th>施設・備品</th><th>期間</th><th>状況</th><th>操作</th></tr><?php foreach($rows as $r): ?><tr><td><?=esc($r['id'])?></td><td><?=esc($r['item_name'])?></td><td><?=esc($r['start_date'])?> ～ <?=esc($r['end_date'])?></td><td><?=esc(status_name($r['status']))?></td><td><?php if($r['status']==='pending'): ?><?php f('cancel','mine','キャンセル','<input type="hidden" name="id" value="'.esc($r['id']).'">','inline'); ?><?php endif; ?></td></tr><?php endforeach; ?></table></div></section>
 <?php elseif($page==='manage_reservations'): require_admin($u); $rows=q('SELECT r.*,u.name AS user_name,i.name AS item_name FROM reservations r JOIN users u ON u.id=r.user_id JOIN items i ON i.id=r.item_id ORDER BY r.id DESC')->fetchAll(); $tr=['pending'=>['approved','rejected'],'approved'=>['lent','canceled'],'lent'=>['returned']]; ?>
 <section class="card"><h2>予約管理（管理者）</h2><div class="scroll"><table><tr><th>ID</th><th>申請者</th><th>施設・備品</th><th>期間</th><th>状態</th><th>操作</th></tr><?php foreach($rows as $r): ?><tr><td><?=esc($r['id'])?></td><td><?=esc($r['user_name'])?></td><td><?=esc($r['item_name'])?></td><td><?=esc($r['start_date'])?> ～ <?=esc($r['end_date'])?></td><td><?=esc(status_name($r['status']))?></td><td><?php foreach($tr[$r['status']]??[] as $to): ?><?php f('change_reservation','manage_reservations',status_name($to),'<input type="hidden" name="id" value="'.esc($r['id']).'"><input type="hidden" name="status" value="'.esc($to).'">','inline'); ?><?php endforeach; ?></td></tr><?php endforeach; ?></table></div></section>
 <?php elseif($page==='manage_items'): require_admin($u); ?>
