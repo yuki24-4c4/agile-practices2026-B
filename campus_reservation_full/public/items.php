@@ -166,6 +166,7 @@ $isAdmin = ($currentUser['role'] ?? null) === 'admin';
   <nav>
     <?php if ($currentUser): ?>
       <span><?= e($currentUser['name']) ?>さん</span>
+      <?php if ($isAdmin): ?><a href="/admin_items.php">施設・備品管理</a><?php endif; ?>
       <form method="post" action="/logout.php">
         <input type="hidden" name="csrf_token" value="<?= e($_SESSION['csrf_token'] ?? '') ?>">
         <button type="submit">ログアウト</button>
