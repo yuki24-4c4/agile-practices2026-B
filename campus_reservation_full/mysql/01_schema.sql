@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS items (
   category_id INT UNSIGNED NOT NULL,
   name VARCHAR(100) NOT NULL,
   description TEXT NULL,
+  storage_location VARCHAR(255) NULL,
   status ENUM('available','maintenance','inactive') NOT NULL DEFAULT 'available',
   PRIMARY KEY (id),
   KEY idx_items_category (category_id),
