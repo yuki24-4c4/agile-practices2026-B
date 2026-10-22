@@ -18,11 +18,39 @@ function e(?string $value): string
     return htmlspecialchars($value ?? '', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
 
+const LOGIN_MAX_FAILURES = 5;
+const LOGIN_LOCK_SECONDS = 30;
+const IDLE_TIMEOUT_SECONDS = 1800;
+
+if (
+    !empty($_SESSION['uid'])
+    && isset($_SESSION['last_activity'])
+    && time() - (int) $_SESSION['last_activity'] > IDLE_TIMEOUT_SECONDS
+) {
+    $_SESSION = [];
+    if (ini_get('session.use_cookies')) {
+        $p = session_get_cookie_params();
+        setcookie(session_name(), '', time() - 42000, $p['path'], $p['domain'], $p['secure'], $p['httponly']);
+    }
+    session_destroy();
+    session_start();
+    $_SESSION['idle_expired'] = true;
+    header('Location: /login.php');
+    exit;
+}
+
+if (!empty($_SESSION['uid']) && isset($_SESSION['last_activity'])) {
+    $_SESSION['last_activity'] = time();
+}
+
+$idleExpired = !empty($_SESSION['idle_expired']);
+unset($_SESSION['idle_expired']);
+
 if (empty($_SESSION['csrf_token'])) {
     $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
 }
 
-$error = null;
+$error = $idleExpired ? '一定時間操作がなかったため、再度ログインしてください。' : null;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (
@@ -33,12 +61,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit(e('不正なリクエストです。'));
     }
 
-    // TODO: TBD-005。失敗回数と制限時間は未決。
+    // TODO: カウント方式は未決。現行スキーマに login_attempts がないため、セッションへ失敗回数と最終失敗時刻を記録する。
     // TODO: REQ-F-001 の利用停止。現行 users に active 列がないため未判定。
+    $_SESSION['login_failures'] = (int) ($_SESSION['login_failures'] ?? 0);
+    if (
+        $_SESSION['login_failures'] >= LOGIN_MAX_FAILURES
+        && isset($_SESSION['login_failed_at'])
+        && time() - (int) $_SESSION['login_failed_at'] >= LOGIN_LOCK_SECONDS
+    ) {
+        $_SESSION['login_failures'] = 0;
+        unset($_SESSION['login_failed_at']);
+    }
     $email = trim((string) ($_POST['email'] ?? ''));
     $password = (string) ($_POST['password'] ?? '');
     $row = null;
-    if ($email === '' || $password === '') {
+    if ($_SESSION['login_failures'] >= LOGIN_MAX_FAILURES) {
+        $error = 'ログインの試行回数が上限に達しました。';
+    } elseif ($email === '' || $password === '') {
         $error = 'メールアドレスとパスワードを入力してください';
     } elseif (strlen($password) < 8) {
         $error = 'パスワードは8文字以上で入力してください';
@@ -61,9 +100,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($error === null && (!$row || !password_verify($password, (string) $row['password']))) {
-        $error = 'ログイン情報を確認してください';
+        $_SESSION['login_failures']++;
+        $_SESSION['login_failed_at'] = time();
+        $error = $_SESSION['login_failures'] >= LOGIN_MAX_FAILURES
+            ? 'ログインの試行回数が上限に達しました。'
+            : 'ログイン情報を確認してください';
     }
     if ($error === null) {
+        unset($_SESSION['login_failures'], $_SESSION['login_failed_at']);
         session_regenerate_id(true);
         $_SESSION['last_activity'] = time();
         $_SESSION['uid'] = $row['id'];
