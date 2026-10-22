@@ -68,9 +68,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_SESSION['last_activity'] = time();
         $_SESSION['uid'] = $row['id'];
         // TODO: 設計のセッションキー user_id, role は未採用。
-        // TODO: 管理トップの URL は未確定。現行の一覧は /?page=items。
+        // TODO: 管理トップの URL は未確定。現行は共通の一覧へ遷移する。
         $_SESSION['flash'] = ['message' => 'ログインしました。', 'error' => false];
-        header('Location: /?page=items');
+        header('Location: /items.php');
         exit;
     }
 }
