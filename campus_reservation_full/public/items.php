@@ -36,8 +36,28 @@ function status_label(string $status): string
 }
 
 $items = [];
+$categories = [];
 $currentUser = null;
 $error = null;
+$searchError = null;
+$keywordInput = $_GET['keyword'] ?? '';
+$categoryInput = $_GET['category_id'] ?? '';
+$keyword = is_string($keywordInput) ? trim($keywordInput) : '';
+$categoryId = null;
+
+if (!is_string($keywordInput) || preg_match('//u', $keyword) !== 1) {
+    $searchError = '検索キーワードを確認してください。';
+} elseif (preg_match_all('/./us', $keyword) > 100) {
+    $searchError = '検索キーワードは100文字以内で入力してください。';
+}
+
+if ($categoryInput !== '') {
+    if (!is_string($categoryInput) || !ctype_digit($categoryInput) || (int) $categoryInput < 1) {
+        $searchError = '分類を選び直してください。';
+    } else {
+        $categoryId = (int) $categoryInput;
+    }
+}
 
 try {
     $pdo = new PDO(
@@ -61,14 +81,41 @@ try {
         $currentUser = $userStatement->fetch() ?: null;
     }
 
-    $itemStatement = $pdo->prepare(
-        'SELECT i.id, i.name, c.name AS category_name, i.status'
+    $categoryStatement = $pdo->prepare('SELECT id, name FROM categories ORDER BY name');
+    $categoryStatement->execute();
+    $categories = $categoryStatement->fetchAll();
+
+    if ($categoryId !== null) {
+        $validCategoryIds = array_map(
+            static fn(array $category): int => (int) $category['id'],
+            $categories
+        );
+        if (!in_array($categoryId, $validCategoryIds, true)) {
+            $searchError = '分類を選び直してください。';
+        }
+    }
+
+    if ($searchError === null) {
+        $itemSql = 'SELECT i.id, i.name, c.name AS category_name, i.status'
             . ' FROM items i'
             . ' JOIN categories c ON c.id = i.category_id'
-            . ' ORDER BY i.id'
-    );
-    $itemStatement->execute();
-    $items = $itemStatement->fetchAll();
+            . ' WHERE 1 = 1';
+        $itemParameters = [];
+
+        if ($keyword !== '') {
+            $itemSql .= ' AND i.name LIKE ?';
+            $itemParameters[] = '%' . $keyword . '%';
+        }
+        if ($categoryId !== null) {
+            $itemSql .= ' AND i.category_id = ?';
+            $itemParameters[] = $categoryId;
+        }
+        $itemSql .= ' ORDER BY i.id';
+
+        $itemStatement = $pdo->prepare($itemSql);
+        $itemStatement->execute($itemParameters);
+        $items = $itemStatement->fetchAll();
+    }
 } catch (PDOException) {
     http_response_code(500);
     $error = '施設・備品を取得できませんでした。時間をおいて再度お試しください。';
@@ -96,12 +143,20 @@ $isAdmin = ($currentUser['role'] ?? null) === 'admin';
     main { max-width: 1100px; margin: 28px auto; padding: 0 20px; }
     .card { background: white; padding: 23px; border-radius: 10px; box-shadow: 0 2px 12px #182e4615; }
     .alert { padding: 13px 18px; border-radius: 6px; background: #ffe5e2; color: #8a2b22; }
+    .search { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(180px, 280px) auto auto; gap: 12px; align-items: end; margin-bottom: 20px; }
+    .search label { display: grid; gap: 6px; font-weight: 600; }
+    .search input, .search select, .search button, .search a { min-height: 42px; padding: 9px 12px; border-radius: 6px; font: inherit; }
+    .search input, .search select { border: 1px solid #aebbd0; background: white; }
+    .search button { border: 0; background: #215a9c; color: white; cursor: pointer; }
+    .search a { display: inline-flex; align-items: center; color: #215a9c; }
     .scroll { overflow-x: auto; }
     table { border-collapse: collapse; width: 100%; }
     th, td { padding: 12px; border-bottom: 1px solid #dce2eb; text-align: left; }
     th { background: #f0f4f9; }
     .pill { display: inline-block; padding: 4px 9px; border-radius: 20px; background: #e9effa; }
     .empty { text-align: center; color: #617287; }
+    .detail-link { white-space: nowrap; }
+    @media (max-width: 760px) { .search { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -123,8 +178,29 @@ $isAdmin = ($currentUser['role'] ?? null) === 'admin';
 <main>
   <section class="card">
     <h2>施設・備品一覧</h2>
+    <form method="get" action="/items.php" class="search">
+      <label>
+        名称
+        <input type="search" name="keyword" maxlength="100" value="<?= e($keyword) ?>" placeholder="例：教室、ノートPC">
+      </label>
+      <label>
+        分類
+        <select name="category_id">
+          <option value="">すべての分類</option>
+          <?php foreach ($categories as $category): ?>
+            <option value="<?= e($category['id']) ?>" <?= $categoryId === (int) $category['id'] ? 'selected' : '' ?>>
+              <?= e($category['name']) ?>
+            </option>
+          <?php endforeach; ?>
+        </select>
+      </label>
+      <button type="submit">検索</button>
+      <a href="/items.php">条件をクリア</a>
+    </form>
     <?php if ($error): ?>
       <p class="alert" role="alert"><?= e($error) ?></p>
+    <?php elseif ($searchError): ?>
+      <p class="alert" role="alert"><?= e($searchError) ?></p>
     <?php else: ?>
       <div class="scroll">
         <table>
@@ -134,11 +210,12 @@ $isAdmin = ($currentUser['role'] ?? null) === 'admin';
             <th>名称</th>
             <th>分類</th>
             <th>利用状態</th>
+            <th>詳細</th>
           </tr>
           </thead>
           <tbody>
           <?php if (!$items): ?>
-            <tr><td class="empty" colspan="<?= $isAdmin ? '4' : '3' ?>">表示できる施設・備品はありません。</td></tr>
+            <tr><td class="empty" colspan="<?= $isAdmin ? '5' : '4' ?>">検索条件に一致する施設・備品はありません。</td></tr>
           <?php else: ?>
             <?php foreach ($items as $item): ?>
               <tr>
@@ -146,6 +223,7 @@ $isAdmin = ($currentUser['role'] ?? null) === 'admin';
                 <td><?= e($item['name']) ?></td>
                 <td><?= e($item['category_name']) ?></td>
                 <td><span class="pill"><?= e(status_label((string) $item['status'])) ?></span></td>
+                <td><a class="detail-link" href="/item_detail.php?id=<?= e($item['id']) ?>">詳細を見る</a></td>
               </tr>
             <?php endforeach; ?>
           <?php endif; ?>
