@@ -48,3 +48,18 @@ CREATE TABLE IF NOT EXISTS reservations (
     REFERENCES items(id) ON UPDATE CASCADE ON DELETE RESTRICT,
   CONSTRAINT chk_reservations_dates CHECK (end_date >= start_date)
 ) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  actor_user_id INT UNSIGNED NOT NULL,
+  action VARCHAR(50) NOT NULL,
+  target_type VARCHAR(50) NOT NULL,
+  target_id INT UNSIGNED NOT NULL,
+  details TEXT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_audit_logs_actor_created (actor_user_id, created_at),
+  KEY idx_audit_logs_target (target_type, target_id),
+  CONSTRAINT fk_audit_logs_actor FOREIGN KEY (actor_user_id)
+    REFERENCES users(id) ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB;
