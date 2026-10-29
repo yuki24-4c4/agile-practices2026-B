@@ -2,6 +2,7 @@
 -- Run schema.sql first.
 -- Re-running this script updates the same sample IDs.
 -- Demo password for all users: DemoPass123! (test environment only).
+SET NAMES utf8mb4;
 
 USE campus_reservation;
 START TRANSACTION;
