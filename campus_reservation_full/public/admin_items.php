@@ -82,13 +82,14 @@ function utf8_length(string $value): ?int
     return $count === false ? null : $count;
 }
 
-/** @return array{0: array{name: string, category_id: int, description: string, status: string}, 1: list<string>} */
+/** @return array{0: array{name: string, category_id: int, description: string, storage_location: string, status: string}, 1: list<string>} */
 function validate_item_input(array $validCategoryIds): array
 {
-    // 更新対象はこの4項目だけ。余分なPOST項目は読み取らずDBへ反映しない。
+    // 更新対象はこの5項目だけ。余分なPOST項目は読み取らずDBへ反映しない。
     $name = post_string('name');
     $categoryInput = post_string('category_id');
     $description = post_string('description');
+    $storageLocation = post_string('storage_location');
     $status = post_string('status');
     $errors = [];
 
@@ -109,6 +110,11 @@ function validate_item_input(array $validCategoryIds): array
         $errors[] = '説明は1000文字以内で入力してください。';
     }
 
+    $storageLocationLength = utf8_length($storageLocation);
+    if ($storageLocationLength === null || $storageLocationLength > 255) {
+        $errors[] = '保管場所は255文字以内で入力してください。';
+    }
+
     if (!in_array($status, ['available', 'maintenance', 'inactive'], true)) {
         $errors[] = '利用状態を選び直してください。';
     }
@@ -117,6 +123,7 @@ function validate_item_input(array $validCategoryIds): array
         'name' => $name,
         'category_id' => $categoryId,
         'description' => $description,
+        'storage_location' => $storageLocation,
         'status' => $status,
     ], $errors];
 }
@@ -208,12 +215,14 @@ try {
 
                 $pdo->beginTransaction();
                 $statement = $pdo->prepare(
-                    'INSERT INTO items (category_id, name, description, status) VALUES (?, ?, ?, ?)'
+                    'INSERT INTO items (category_id, name, description, storage_location, status)'
+                    . ' VALUES (?, ?, ?, ?, ?)'
                 );
                 $statement->execute([
                     $values['category_id'],
                     $values['name'],
                     $values['description'] !== '' ? $values['description'] : null,
+                    $values['storage_location'] !== '' ? $values['storage_location'] : null,
                     $values['status'],
                 ]);
                 $itemId = (int) $pdo->lastInsertId();
@@ -230,7 +239,8 @@ try {
 
             $pdo->beginTransaction();
             $currentItemStatement = $pdo->prepare(
-                'SELECT id, category_id, name, description, status FROM items WHERE id = ? FOR UPDATE'
+                'SELECT id, category_id, name, description, storage_location, status'
+                . ' FROM items WHERE id = ? FOR UPDATE'
             );
             $currentItemStatement->execute([$itemId]);
             $currentItem = $currentItemStatement->fetch();
@@ -248,12 +258,14 @@ try {
                 }
 
                 $statement = $pdo->prepare(
-                    'UPDATE items SET category_id = ?, name = ?, description = ?, status = ? WHERE id = ?'
+                    'UPDATE items SET category_id = ?, name = ?, description = ?,'
+                    . ' storage_location = ?, status = ? WHERE id = ?'
                 );
                 $statement->execute([
                     $values['category_id'],
                     $values['name'],
                     $values['description'] !== '' ? $values['description'] : null,
+                    $values['storage_location'] !== '' ? $values['storage_location'] : null,
                     $values['status'],
                     $itemId,
                 ]);
@@ -304,7 +316,7 @@ try {
 if ($pdo instanceof PDO && !$accessDenied && ($currentUser['role'] ?? null) === 'admin') {
     try {
         $itemStatement = $pdo->prepare(
-            'SELECT i.id, i.category_id, i.name, i.description, i.status,'
+            'SELECT i.id, i.category_id, i.name, i.description, i.storage_location, i.status,'
             . ' c.name AS category_name FROM items i'
             . ' JOIN categories c ON c.id = i.category_id ORDER BY i.id'
         );
@@ -372,6 +384,7 @@ if ($pdo instanceof PDO && !$accessDenied && ($currentUser['role'] ?? null) === 
   <p>施設・備品管理</p>
   <nav>
     <a href="/items.php">施設・備品一覧</a>
+    <a href="/admin_reservations.php">貸出・返却管理</a>
     <?php if ($currentUser): ?><span><?= e($currentUser['name']) ?>さん</span><?php endif; ?>
     <?php if ($currentUser): ?>
       <form method="post" action="/logout.php">
@@ -413,6 +426,7 @@ if ($pdo instanceof PDO && !$accessDenied && ($currentUser['role'] ?? null) === 
           </label>
         </div>
         <label>説明<textarea name="description" maxlength="1000"></textarea></label>
+        <label>保管場所<input name="storage_location" maxlength="255"></label>
         <button type="submit">登録する</button>
       </form>
     </section>
@@ -422,7 +436,7 @@ if ($pdo instanceof PDO && !$accessDenied && ($currentUser['role'] ?? null) === 
       <?php foreach ($items as $item): ?>
         <details>
           <summary>
-            <?= e($item['name']) ?>（<?= e($item['category_name']) ?>・<?= e(status_label((string) $item['status'])) ?>）
+            <?= e($item['name']) ?>（<?= e($item['category_name']) ?>・<?= e($item['storage_location'] ?: '保管場所未登録') ?>・<?= e(status_label((string) $item['status'])) ?>）
           </summary>
           <form method="post" action="/admin_items.php">
             <input type="hidden" name="csrf_token" value="<?= e($_SESSION['csrf_token']) ?>">
@@ -451,6 +465,7 @@ if ($pdo instanceof PDO && !$accessDenied && ($currentUser['role'] ?? null) === 
               </label>
             </div>
             <label>説明<textarea name="description" maxlength="1000"><?= e($item['description']) ?></textarea></label>
+            <label>保管場所<input name="storage_location" maxlength="255" value="<?= e($item['storage_location']) ?>"></label>
             <div class="actions">
               <button type="submit">変更を保存</button>
             </div>

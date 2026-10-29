@@ -96,7 +96,8 @@ try {
     }
 
     if ($searchError === null) {
-        $itemSql = 'SELECT i.id, i.name, c.name AS category_name, i.status'
+        $itemSql = 'SELECT i.id, i.name, c.name AS category_name,'
+            . ' i.storage_location, i.status'
             . ' FROM items i'
             . ' JOIN categories c ON c.id = i.category_id'
             . ' WHERE 1 = 1';
@@ -166,8 +167,11 @@ $isAdmin = ($currentUser['role'] ?? null) === 'admin';
   <nav>
     <?php if ($currentUser): ?>
       <span><?= e($currentUser['name']) ?>さん</span>
-      <a href="/my_reservations.php">自分の予約</a>
-      <?php if ($isAdmin): ?><a href="/admin_items.php">施設・備品管理</a><?php endif; ?>
+    <a href="/my_reservations.php">自分の予約</a>
+      <?php if ($isAdmin): ?>
+        <a href="/admin_reservations.php">貸出・返却管理</a>
+        <a href="/admin_items.php">施設・備品管理</a>
+      <?php endif; ?>
       <form method="post" action="/logout.php">
         <input type="hidden" name="csrf_token" value="<?= e($_SESSION['csrf_token'] ?? '') ?>">
         <button type="submit">ログアウト</button>
@@ -211,19 +215,21 @@ $isAdmin = ($currentUser['role'] ?? null) === 'admin';
             <?php if ($isAdmin): ?><th>管理用ID</th><?php endif; ?>
             <th>名称</th>
             <th>分類</th>
+            <th>保管場所</th>
             <th>利用状態</th>
             <th>詳細</th>
           </tr>
           </thead>
           <tbody>
           <?php if (!$items): ?>
-            <tr><td class="empty" colspan="<?= $isAdmin ? '5' : '4' ?>">検索条件に一致する施設・備品はありません。</td></tr>
+            <tr><td class="empty" colspan="<?= $isAdmin ? '6' : '5' ?>">検索条件に一致する施設・備品はありません。</td></tr>
           <?php else: ?>
             <?php foreach ($items as $item): ?>
               <tr>
                 <?php if ($isAdmin): ?><td><?= e($item['id']) ?></td><?php endif; ?>
                 <td><?= e($item['name']) ?></td>
                 <td><?= e($item['category_name']) ?></td>
+                <td><?= e($item['storage_location'] ?: '未登録') ?></td>
                 <td><span class="pill"><?= e(status_label((string) $item['status'])) ?></span></td>
                 <td><a class="detail-link" href="/item_detail.php?id=<?= e($item['id']) ?>">詳細を見る</a></td>
               </tr>

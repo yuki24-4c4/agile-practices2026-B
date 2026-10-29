@@ -67,10 +67,9 @@ if (!is_string($idInput) || !ctype_digit($idInput) || (int) $idInput < 1) {
             $currentUser = $userStatement->fetch() ?: null;
         }
 
-        // 現行のitemsテーブルに保管場所列がないため、追加されるまでは未登録として扱う。
         $itemStatement = $pdo->prepare(
             'SELECT i.id, i.name, i.description, i.status,'
-                . ' c.name AS category_name, NULL AS storage_location'
+                . ' c.name AS category_name, i.storage_location'
                 . ' FROM items i'
                 . ' JOIN categories c ON c.id = i.category_id'
                 . ' WHERE i.id = ?'
@@ -166,7 +165,7 @@ $isAdmin = ($currentUser['role'] ?? null) === 'admin';
       </dl>
       <div class="actions">
         <?php if ($item['status'] === 'available' && $currentUser): ?>
-          <a class="button" href="/?page=reserve&amp;id=<?= e($item['id']) ?>">予約する</a>
+          <a class="button" href="/rese_request.php?id=<?= e($item['id']) ?>">予約する</a>
         <?php elseif ($item['status'] === 'available'): ?>
           <a class="button" href="/login.php">ログインして予約する</a>
         <?php else: ?>
