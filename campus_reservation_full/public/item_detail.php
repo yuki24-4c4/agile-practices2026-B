@@ -166,7 +166,7 @@ $isAdmin = ($currentUser['role'] ?? null) === 'admin';
       </dl>
       <div class="actions">
         <?php if ($item['status'] === 'available' && $currentUser): ?>
-          <a class="button" href="/?page=reserve&amp;id=<?= e($item['id']) ?>">予約する</a>
+          <a class="button" href="/rese_request.php?id=<?= e($item['id']) ?>">予約する</a>
         <?php elseif ($item['status'] === 'available'): ?>
           <a class="button" href="/login.php">ログインして予約する</a>
         <?php else: ?>
