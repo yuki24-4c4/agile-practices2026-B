@@ -384,6 +384,7 @@ if ($pdo instanceof PDO && !$accessDenied && ($currentUser['role'] ?? null) === 
   <p>施設・備品管理</p>
   <nav>
     <a href="/items.php">施設・備品一覧</a>
+    <a href="/admin_reservations.php">貸出・返却管理</a>
     <?php if ($currentUser): ?><span><?= e($currentUser['name']) ?>さん</span><?php endif; ?>
     <?php if ($currentUser): ?>
       <form method="post" action="/logout.php">
