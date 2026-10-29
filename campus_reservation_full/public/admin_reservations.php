@@ -222,7 +222,7 @@ if ($pdo instanceof PDO && !$accessDenied && ($currentUser['role'] ?? null) === 
     try {
         $reservationStatement = $pdo->prepare(
             'SELECT r.id, r.start_date, r.end_date, r.status,'
-            . ' u.name AS user_name, i.name AS item_name,'
+            . ' u.name AS user_name, i.name AS item_name, i.storage_location,'
             . " CASE WHEN r.status = 'lent' AND r.end_date < CURRENT_DATE THEN 1 ELSE 0 END AS is_overdue"
             . ' FROM reservations r'
             . ' JOIN users u ON u.id = r.user_id'
@@ -321,7 +321,10 @@ if ($pdo instanceof PDO && !$accessDenied && ($currentUser['role'] ?? null) === 
               <tr>
                 <td><?= e($reservation['id']) ?></td>
                 <td><?= e($reservation['user_name']) ?></td>
-                <td><?= e($reservation['item_name']) ?></td>
+                <td>
+                  <?= e($reservation['item_name']) ?><br>
+                  <small>保管場所: <?= e($reservation['storage_location'] ?: '未登録') ?></small>
+                </td>
                 <td><?= e($reservation['start_date']) ?> ～ <?= e($reservation['end_date']) ?></td>
                 <td><span class="pill"><?= e(reservation_status_label((string) $reservation['status'])) ?></span></td>
                 <td>
