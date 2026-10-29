@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__ . '/audit.php';
 
 header('Content-Type: text/html; charset=UTF-8');
 header('X-Content-Type-Options: nosniff');
@@ -83,17 +84,7 @@ function audit_reservation(
     int $reservationId,
     array $details
 ): void {
-    $statement = $pdo->prepare(
-        'INSERT INTO audit_logs (actor_user_id, action, target_type, target_id, details)'
-        . ' VALUES (?, ?, ?, ?, ?)'
-    );
-    $statement->execute([
-        $actorId,
-        $action,
-        'reservation',
-        $reservationId,
-        json_encode($details, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
-    ]);
+    write_audit_log($pdo, $actorId, $action, 'reservation', $reservationId, $details);
 }
 
 function redirect_with_message(string $message): never

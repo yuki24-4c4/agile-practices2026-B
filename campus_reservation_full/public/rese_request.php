@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__ . '/audit.php';
 
 header('Content-Type: text/html; charset=UTF-8');
 header('X-Frame-Options: DENY');
@@ -244,6 +245,9 @@ try {
                             $startDate,
                             $dueDate,
                             $purpose,
+                        ]);
+                        write_audit_log($pdo, (int) $currentUser['id'], 'reservation.create', 'reservation', (int) $pdo->lastInsertId(), [
+                            'user_id' => (int) $currentUser['id'], 'item_id' => $itemId, 'after_status' => 'pending',
                         ]);
                         $pdo->commit();
                         $_SESSION['rese_flash'] = '予約申請を受け付けました。';
