@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__ . '/audit.php';
 
 header('Content-Type: text/html; charset=UTF-8');
 header('X-Frame-Options: DENY');
@@ -75,6 +76,9 @@ try {
             http_response_code(403);
             throw new DomainException('この予約はキャンセルできません。');
         }
+        write_audit_log($pdo, (int) $user['id'], 'reservation.cancel', 'reservation', (int) $idInput, [
+            'before_status' => 'pending', 'after_status' => 'canceled',
+        ]);
         $pdo->commit();
         $_SESSION['my_reservations_notice'] = '予約をキャンセルしました。';
         header('Location: /my_reservations.php');

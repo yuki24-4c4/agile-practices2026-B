@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__ . '/audit.php';
 
 header('Content-Type: text/html; charset=UTF-8');
 header('X-Content-Type-Options: nosniff');
@@ -130,17 +131,11 @@ function validate_item_input(array $validCategoryIds): array
 
 function audit(PDO $pdo, int $actorId, string $action, int $targetId, array $details): void
 {
-    $statement = $pdo->prepare(
-        'INSERT INTO audit_logs (actor_user_id, action, target_type, target_id, details)'
-        . ' VALUES (?, ?, ?, ?, ?)'
-    );
-    $statement->execute([
-        $actorId,
-        $action,
-        'item',
-        $targetId,
-        json_encode($details, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
-    ]);
+    $safeDetails = [
+        'before_status' => $details['before_status'] ?? ($details['before']['status'] ?? null),
+        'after_status' => $details['after_status'] ?? ($details['after']['status'] ?? null),
+    ];
+    write_audit_log($pdo, $actorId, $action, 'item', $targetId, $safeDetails);
 }
 
 function redirect_with_message(string $message): never
