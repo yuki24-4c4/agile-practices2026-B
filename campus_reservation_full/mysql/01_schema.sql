@@ -1,4 +1,6 @@
 -- MySQL 8.x / MariaDB: database and four core tables
+SET NAMES utf8mb4;
+
 CREATE DATABASE IF NOT EXISTS campus_reservation
   CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE campus_reservation;
@@ -63,4 +65,6 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   KEY idx_audit_logs_target (target_type, target_id),
   CONSTRAINT fk_audit_logs_actor FOREIGN KEY (actor_user_id)
     REFERENCES users(id) ON UPDATE CASCADE ON DELETE RESTRICT
-) ENGINE=InnoDB;
+) ENGINE=InnoDB
+  DEFAULT CHARSET=utf8mb4
+  COLLATE=utf8mb4_unicode_ci;
