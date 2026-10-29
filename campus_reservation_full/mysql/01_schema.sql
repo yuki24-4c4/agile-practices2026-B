@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS reservations (
   item_id INT UNSIGNED NOT NULL,
   start_date DATE NOT NULL,
   end_date DATE NOT NULL,
+  -- TBD-004: 利用目的の最終最大文字数は未決。詳細設計の仮値。
+  purpose VARCHAR(500) NOT NULL DEFAULT '',
   status ENUM('pending','approved','lent','returned','rejected','canceled') NOT NULL DEFAULT 'pending',
   PRIMARY KEY (id),
   KEY idx_reservations_user (user_id),
