@@ -143,6 +143,8 @@ try {
 
         $action = post_string('action');
         $transitions = [
+            'approve' => ['from' => 'pending', 'to' => 'approved', 'audit' => 'reservation.approve'],
+            'reject' => ['from' => 'pending', 'to' => 'rejected', 'audit' => 'reservation.reject'],
             'lend' => ['from' => 'approved', 'to' => 'lent', 'audit' => 'reservation.lend'],
             'return' => ['from' => 'lent', 'to' => 'returned', 'audit' => 'reservation.return'],
         ];
@@ -180,6 +182,29 @@ try {
             );
         }
 
+        if ($action === 'approve') {
+            // 同一施設・備品への承認を直列化し、確定済み予約を現在の状態で再確認する。
+            $itemStatement = $pdo->prepare('SELECT id, status FROM items WHERE id = ? FOR UPDATE');
+            $itemStatement->execute([(int) $reservation['item_id']]);
+            $item = $itemStatement->fetch();
+            if (!$item || $item['status'] !== 'available') {
+                http_response_code(409);
+                throw new DomainException('この施設・備品は現在利用できません。');
+            }
+            $overlapStatement = $pdo->prepare(
+                "SELECT id FROM reservations WHERE item_id = ? AND id <> ? AND status IN ('approved', 'lent')"
+                . ' AND start_date <= ? AND end_date >= ? LIMIT 1 FOR UPDATE'
+            );
+            $overlapStatement->execute([
+                (int) $reservation['item_id'], $reservationId,
+                $reservation['end_date'], $reservation['start_date'],
+            ]);
+            if ($overlapStatement->fetch()) {
+                http_response_code(409);
+                throw new DomainException('承認済みまたは貸出中の予約と期間が重複しています。');
+            }
+        }
+
         $updateStatement = $pdo->prepare(
             'UPDATE reservations SET status = ? WHERE id = ? AND status = ?'
         );
@@ -203,7 +228,11 @@ try {
         );
 
         $pdo->commit();
-        redirect_with_message($action === 'lend' ? '貸出処理を記録しました。' : '返却処理を記録しました。');
+        $messages = [
+            'approve' => '予約を承認しました。', 'reject' => '予約を却下しました。',
+            'lend' => '貸出処理を記録しました。', 'return' => '返却処理を記録しました。',
+        ];
+        redirect_with_message($messages[$action]);
     }
 } catch (DomainException $exception) {
     if ($pdo instanceof PDO && $pdo->inTransaction()) {
@@ -335,7 +364,20 @@ if ($pdo instanceof PDO && !$accessDenied && ($currentUser['role'] ?? null) === 
                   <?php else: ?>—<?php endif; ?>
                 </td>
                 <td>
-                  <?php if ($reservation['status'] === 'approved'): ?>
+                  <?php if ($reservation['status'] === 'pending'): ?>
+                    <form method="post" action="/admin_reservations.php" class="inline">
+                      <input type="hidden" name="csrf_token" value="<?= e($_SESSION['csrf_token']) ?>">
+                      <input type="hidden" name="action" value="approve">
+                      <input type="hidden" name="reservation_id" value="<?= e($reservation['id']) ?>">
+                      <button type="submit">承認する</button>
+                    </form>
+                    <form method="post" action="/admin_reservations.php" class="inline">
+                      <input type="hidden" name="csrf_token" value="<?= e($_SESSION['csrf_token']) ?>">
+                      <input type="hidden" name="action" value="reject">
+                      <input type="hidden" name="reservation_id" value="<?= e($reservation['id']) ?>">
+                      <button type="submit">却下する</button>
+                    </form>
+                  <?php elseif ($reservation['status'] === 'approved'): ?>
                     <form method="post" action="/admin_reservations.php" class="inline">
                       <input type="hidden" name="csrf_token" value="<?= e($_SESSION['csrf_token']) ?>">
                       <input type="hidden" name="action" value="lend">
@@ -360,13 +402,13 @@ if ($pdo instanceof PDO && !$accessDenied && ($currentUser['role'] ?? null) === 
     </section>
 
     <section class="card">
-      <h2>貸出・返却の監査ログ（最新20件）</h2>
+      <h2>予約操作の監査ログ（最新20件）</h2>
       <div class="scroll">
         <table>
           <thead><tr><th>日時</th><th>担当者</th><th>操作</th><th>予約ID</th><th>内容</th></tr></thead>
           <tbody>
           <?php if ($auditLogs === []): ?>
-            <tr><td class="empty" colspan="5">貸出・返却の監査ログはまだありません。</td></tr>
+            <tr><td class="empty" colspan="5">予約操作の監査ログはまだありません。</td></tr>
           <?php else: ?>
             <?php foreach ($auditLogs as $log): ?>
               <tr>
